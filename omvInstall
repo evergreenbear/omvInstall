@@ -1,0 +1,114 @@
+#!/bin/bash
+
+##
+## omvInstall: quickly install OpenMandriva from minimal ISO
+##
+
+# modified from https://gist.github.com/dotike/8257326
+shout() { printf "\n${bold}error:${clear} $*" >&2; }
+die() { shout "$*"; exit 111; }
+try() { "$@" || die "cannot $*"; }
+
+## colors for fancy output
+declare -r red='\033[0;31m'
+declare -r redbold='\033[01;31m'
+declare -r greenbold='\033[01;32m'
+declare -r cyan='\033[0;36m'
+declare -r cyanbold='\033[01;36m'
+declare -r magenta='\033[0;35m'
+declare -r magentabold='\033[01;35m'
+declare -r bold='\033[01m'
+declare -r clear='\033[0m'
+
+## global variables
+[[ -d /sys/firmware/efi ]] && declare -r sys_isUEFI=1 || declare -r sys_isUEFI=0
+
+usage() {
+	printf "$(
+	cat <<- EOF
+	${bold}omvInstall${clear}: quick installer for OMV minimal snapshots
+	
+	${bold}usage${clear}:
+	${bold}foo${clear}: does foo action (-f|--foo)
+	${bold}bar${clear}: does bar action (-b|--bar)
+	EOF
+	)"
+	exit 1
+}
+
+checkYesNo() {
+	while true; do
+		printf "${bold}$1${clear} (Y/n/?)  "; read input
+		case "${input,,}" in
+       		"y") return 0 ;;
+			"n") return 1 ;;
+		 	"?") printf "\n$2\n" ;; 
+			*) die "Not a Y/n input: $1"
+		esac
+	done
+}
+
+configureZram() {
+	## zram-init
+	dnf in -y zram-init
+	for service in "zram_swap" "zram_var" "zram_var_tmp"; do try systemctl enable "$service".service; done
+}
+
+stepPartition() {
+	lsblk
+	printf "${bold}Disk to use : ${clear}"; read partition_Disk; partition_Disk="/dev/${partition_Disk##*/}"
+	[[ -z "$(blkid | grep $partition_Disk)" ]] && die "invalid disk $partition_Disk"
+	if checkYesNo "Partition disk automatically?" "Use an automatic layout: 1GB EFI partition if applicable and root partition w/ BTRFS submounts"; then
+		## automatic partitioning selected
+		## if UEFI
+		if "$sys_isUEFI" == "1"; then
+			try dnf install -y gptfdisk
+			(
+			echo n     #new partition
+			echo 1     #partition number
+			echo       #start sector
+			echo +1G   #end sector
+			echo ef00  #partition type (EFI)
+			echo n     #new partition
+			echo 2     #partition number
+			echo       #start sector  [default]
+			echo       #end sector [default]
+			echo       #partition type [default, 8300]
+			echo w     #write to disk
+			echo y     #confirm write to disk
+			) | gdisk "$partition_Disk" 
+		else
+		## if BIOS
+			(
+			echo o     #new MBR partition table
+			echo n     #new partition
+			echo p     #primary partition
+			echo 1     #partition number
+			echo       #start sector [default]
+			echo       #end sector [default]
+			echo w     #write to disk
+			) | fdisk "$partition_Disk"
+		fi
+	else
+		## manual partitioning
+		## drop to shell and have them return when done
+		echo "You are now being exiled to cfdisk to configure your disk in whichever way you like."; sleep 3
+		cfdisk "$partition_Disk"
+	fi
+	return 0
+}
+
+main() {
+	### sanity check
+	#[[ "$#" -eq 0 ]] && usage
+	# install rsync if not already installed
+	#[[ -z "$(rpm -qa | grep rsync)" ]] && try dnf install -y rsync
+	# if system is uefi, install dosfstools if not already installed
+	#[[ "$sys_isUEFI" -eq 1 ]] && \
+	#	if ! rpm -qa | grep dosfstools; then try dnf install -y dosfstools; fi
+
+	printf "${cyanbold}✱\nOMV Snapshot Simple Installer\n✱${clear}\n"
+	stepPartition
+}
+
+main "$@"
