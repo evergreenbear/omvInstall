@@ -78,7 +78,7 @@ stepPartition() {
 			echo       #partition type [default, 8300]
 			echo w     #write to disk
 			echo y     #confirm write to disk
-			) | gdisk "$partition_Disk" 
+			) | try gdisk "$partition_Disk" 
 		else
 		## if BIOS
 			(
@@ -89,13 +89,17 @@ stepPartition() {
 			echo       #start sector [default]
 			echo       #end sector [default]
 			echo w     #write to disk
-			) | fdisk "$partition_Disk"
+			) | try fdisk "$partition_Disk"
 		fi
 	else
 		## manual partitioning
-		## drop to shell and have them return when done
-		echo "You are now being exiled to cfdisk to configure your disk in whichever way you like."; sleep 3
-		cfdisk "$partition_Disk"
+		## drop to cfdisk and return when done
+		echo "You are now being exiled to cfdisk to configure your disk."; sleep 5
+		try cfdisk "$partition_Disk"; clear
+
+		partitionList="$(cat /proc/partitions | grep ${partitionDisk##*/}[0-999])"
+		partitionList="${partitionList##* }"
+		echo "list is $partitionList"
 	fi
 	return 0
 }
