@@ -56,8 +56,8 @@ configureZram() {
 
 stepPartition() {
 	lsblk
-	printf "${bold}Disk to use : ${clear}"; read partition_Disk; partition_Disk="/dev/${partition_Disk##*/}"
-	[[ -z "$(blkid | grep $partition_Disk)" ]] && die "invalid disk $partition_Disk"
+	printf "${bold}Disk to use : ${clear}"; read partitionDisk; partitionDisk="/dev/${partitionDisk##*/}"
+	[[ -z "$(blkid | grep $partitionDisk)" ]] && die "invalid disk $partitionDisk"
 	if checkYesNo "Partition disk automatically?" "Use an automatic layout: 1GB EFI partition if applicable and root partition w/ BTRFS submounts"; then
 		## automatic partitioning selected
 		## if UEFI
@@ -78,7 +78,7 @@ stepPartition() {
 			echo       #partition type [default, 8300]
 			echo w     #write to disk
 			echo y     #confirm write to disk
-			) | try gdisk "$partition_Disk" 
+			) | try gdisk "$partitionDisk" 
 		else
 		## if BIOS
 			(
@@ -89,13 +89,13 @@ stepPartition() {
 			echo       #start sector [default]
 			echo       #end sector [default]
 			echo w     #write to disk
-			) | try fdisk "$partition_Disk"
+			) | try fdisk "$partitionDisk"
 		fi
 	else
 		## manual partitioning
 		## drop to cfdisk and return when done
 		echo "You are now being exiled to cfdisk to configure your disk."; sleep 5
-		try cfdisk "$partition_Disk"; clear
+		try cfdisk "$partitionDisk"; clear
 
 		partitionList="$(cat /proc/partitions | grep ${partitionDisk##*/}[0-999])"
 		partitionList="${partitionList##* }"
