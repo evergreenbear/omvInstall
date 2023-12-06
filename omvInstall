@@ -40,10 +40,10 @@ checkYesNo() {
 	while true; do
 		printf "${bold}$1${clear} (Y/n/?)  "; read input
 		case "${input,,}" in
-       		"y") return 0 ;;
+       		"y"|"") return 0 ;;
 			"n") return 1 ;;
 		 	"?") printf "\n$2\n" ;; 
-			*) die "Not a Y/n input: $1"
+			*) echo "Not a Y/n input: $1"
 		esac
 	done
 }
@@ -61,9 +61,11 @@ stepPartition() {
 	if checkYesNo "Partition disk automatically?" "Use an automatic layout: 1GB EFI partition if applicable and root partition w/ BTRFS submounts"; then
 		## automatic partitioning selected
 		## if UEFI
-		if "$sys_isUEFI" == "1"; then
+		if [[ "$sys_isUEFI" == "1" ]]; then
 			try dnf install -y gptfdisk
 			(
+			echo o     #new GPT partition table
+			echo y     #confirm new GPT partition table
 			echo n     #new partition
 			echo 1     #partition number
 			echo       #start sector
