@@ -94,11 +94,20 @@ stepPartition() {
 	else
 		## manual partitioning
 		## drop to cfdisk and return when done
-		echo "You are now being exiled to cfdisk to configure your disk."; sleep 5
+		echo "You are now being exiled to cfdisk to configure your disk."; sleep 3
 		try cfdisk "$partitionDisk"; clear
 
-		readarray -t partitionList < <(lablk -n -l -o NAME | grep "$partitionDisk[0-999]")
-		printf "\n${bold}Found partitions on disk:${clear}${partitionList[*]}"
+		readarray -t partitionList < <(lsblk -n -l -o NAME | grep "${partitionDisk##*/}[0-999]")
+		printf "\n${bold}Found partitions on disk: ${clear}${partitionList[*]}\n"
+		
+		i=1; for p in "${partitionList[@]}"; do
+			printf "${bold}Mountpoint for${clear} $i?  "; read partitionMountpoint$i
+			((i++))
+		done
+
+		q=1; until [[ $q == $i ]]; do
+			echo "$q count of matching partition count $i"
+		done
 	fi
 	return 0
 }
