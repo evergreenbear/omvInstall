@@ -97,9 +97,8 @@ stepPartition() {
 		echo "You are now being exiled to cfdisk to configure your disk."; sleep 5
 		try cfdisk "$partitionDisk"; clear
 
-		partitionList="$(cat /proc/partitions | grep ${partitionDisk##*/}[0-999])"
-		partitionList="${partitionList##* }"
-		echo "list is $partitionList"
+		readarray -t partitionList < <(lablk -n -l -o NAME | grep "$partitionDisk[0-999]")
+		printf "\n${bold}Found partitions on disk:${clear}${partitionList[*]}"
 	fi
 	return 0
 }
