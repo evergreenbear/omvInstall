@@ -55,7 +55,7 @@ promptOpenEnded() {
 dropToShell() {
 	printf "\n${bold}$1${clear}"
 	printf "\n${cyanbold}WHEN FINISHED, RETURN TO SCRIPT BY RUNNING ${clear}${bold}'exit'${clear}\n\n"
-	PS1="${bold}[ SUBSHELL${clear} \w${bold} ]# ${clear}" /bin/sh
+	PS1="[ ${bold}SUBSHELL${clear} \w ]# " /bin/sh
 }
 
 configureZram() {
@@ -102,7 +102,7 @@ stepPartition() {
 			) | try fdisk "$partitionDisk"
 		fi
 	else
-		dropToShell "You are now being dropped to a shell to manually configure disks.\nPlease partition, format, configure subvolumes if applicable, and other such things here.\nPlease remember that OMV has not yet been installed on the drive, and you are still working within a live environment. You will be prompted to configure fstab and other related things later.\n"
+		dropToShell "You are now being dropped to a shell to manually configure disks.\nPlease partition, format, configure subvolumes if applicable, and other such things here.\nPlease remember that ${cyanbold}OMV has not yet been installed on the drive${clear}, and ${cyanbold}you are still working within a live environment${bold}. You will be prompted to configure fstab and other related things later.\n"
 		## manual partitioning
 		## drop to cfdisk and return when done
 		#echo "You are now being exiled to cfdisk to configure your disk."; sleep 3
