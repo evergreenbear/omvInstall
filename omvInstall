@@ -19,6 +19,7 @@ declare -r magenta='\033[0;35m'
 declare -r magentabold='\033[01;35m'
 declare -r bold='\033[01m'
 declare -r clear='\033[0m'
+declare -r bluebg='\e[48;5;24m'
 
 ## global variables
 [[ -d /sys/firmware/efi ]] && declare -r sys_isUEFI=1 || declare -r sys_isUEFI=0
@@ -34,6 +35,15 @@ usage() {
 	EOF
 	)"
 	exit 1
+}
+
+ribbon() {
+	local cols=$(tput cols); local text="$1"; local padding=$((cols - ${#text}))
+
+	tput sc #save cursor
+	tput cup $(tput lines) 0 #move cursor to last line
+	echo -en "${bluebg}${bold}${text}$(printf ' %.0s' $(seq 1 $padding))\e[0m" #set colors, print text, reset colors
+	tput rc #reload cursor
 }
 
 checkYesNo() {
@@ -64,7 +74,23 @@ configureZram() {
 	for service in "zram_swap" "zram_var" "zram_var_tmp"; do try systemctl enable "$service".service; done
 }
 
+stepWelcome() {
+	printf "$(
+	cat <<- EOF
+	${cyanbold}✱
+	OMV Snapshot Simple Installer✱
+	${clear}${bold}
+
+	welcome! this is a simple installer for OMV minimal snapshots.
+	EOF
+	)"
+
+	sleep 3; clear
+	return 0
+}
+
 stepPartition() {
+	clear; ribbon "Partitioning"
 	lsblk
 	printf "${bold}Disk to use : ${clear}"; read partitionDisk; partitionDisk="/dev/${partitionDisk##*/}"
 	[[ -z "$(blkid | grep $partitionDisk)" ]] && die "invalid disk $partitionDisk"
@@ -102,21 +128,34 @@ stepPartition() {
 			) | try fdisk "$partitionDisk"
 		fi
 	else
-		dropToShell "You are now being dropped to a shell to manually configure disks.\nPlease partition, format, configure subvolumes if applicable, and other such things here.\nPlease remember that ${cyanbold}OMV has not yet been installed on the drive${clear}${bold}, and ${cyanbold}you are still working within a live environment${clear}${bold}. You will be prompted to configure fstab and other related things later.\n"
 		## manual partitioning
-		## drop to cfdisk and return when done
-		#echo "You are now being exiled to cfdisk to configure your disk."; sleep 3
-		#try cfdisk "$partitionDisk"; clear
-		#declare -A partitionList < <(lsblk -n -l -o NAME | grep "${partitionDisk##*/}[0-999]")
-		#printf "\n${bold}Found partitions on disk: ${clear}${partitionList[*]}\n"	
-		#for partition in "${partitionList[@]}"; do
-		#	printf "${bold}Mountpoint for${clear} $i?  "; read partitionMount
-		#done
-		#q=1; until [[ $q == $i ]]; do
-		#	echo "$q count of matching partition count $i"
-		#done
+		# drop to cfdisk and return when done
+		printf "${bold}You are now being exiled to cfdisk to configure partitions.${clear}"; sleep 3
+		try cfdisk "$partitionDisk"; clear
+		declare -A partitionList < <(lsblk -n -l -o NAME | grep "${partitionDisk##*/}[0-999]")
+		# prompt for filesystem and mountpoint for each partition
+    	for partition in "${!partitionList[@]}"; do
+        	printf "${bold}Filesystem for${clear} $partition?  "; read filesystem
+        	printf "${bold}Mountpoint for${clear} $partition?  "; read mountpoint
+
+        	# Format the partition
+        	try mkfs.$filesystem "/dev/$partition"
+
+        	# Create the mountpoint directory
+        	try mkdir -p "/mnt$mountpoint"
+
+        	# Mount the partition
+        	try mount "/dev/$partition" "/mnt$mountpoint"
+
+        	# Add entry to /etc/fstab
+        	echo "/dev/$partition   $mountpoint   $filesystem   defaults   0   0" >> ./tmp/fstab
+    done	
 	fi
 	return 0
+}
+
+partitioningPostChroot() {
+	dropToShell "You are now being dropped to a shell to manually configure disks.\nPlease partition, format, configure subvolumes if applicable, and other such things here.\nPlease remember that ${cyanbold}OMV has not yet been installed on the drive${clear}${bold}, and ${cyanbold}you are still working within a live environment${clear}${bold}. You will be prompted to configure fstab and other related things later.\n"
 }
 
 main() {
@@ -127,10 +166,9 @@ main() {
 	# if system is uefi, install dosfstools if not already installed
 	#[[ "$sys_isUEFI" -eq 1 ]] && \
 	#	if ! rpm -qa | grep dosfstools; then try dnf install -y dosfstools; fi
-
-	printf "${cyanbold}✱\nOMV Snapshot Simple Installer\n✱${clear}\n"
-	#stepPrimary
-	stepPartition
+	
+	try stepWelcome
+	try stepPartition
 }
 
 main "$@"
