@@ -102,7 +102,7 @@ stepPartition() {
 			) | try fdisk "$partitionDisk"
 		fi
 	else
-		dropToShell "You are now being dropped to a shell to manually configure disks.\nPlease partition, format, configure subvolumes if applicable, and other such things here.\nPlease remember that ${cyanbold}OMV has not yet been installed on the drive${clear}, and ${cyanbold}you are still working within a live environment${clear}${bold}. You will be prompted to configure fstab and other related things later.\n"
+		dropToShell "You are now being dropped to a shell to manually configure disks.\nPlease partition, format, configure subvolumes if applicable, and other such things here.\nPlease remember that ${cyanbold}OMV has not yet been installed on the drive${clear}${bold}, and ${cyanbold}you are still working within a live environment${clear}${bold}. You will be prompted to configure fstab and other related things later.\n"
 		## manual partitioning
 		## drop to cfdisk and return when done
 		#echo "You are now being exiled to cfdisk to configure your disk."; sleep 3
