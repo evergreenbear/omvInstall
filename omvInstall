@@ -48,6 +48,16 @@ checkYesNo() {
 	done
 }
 
+promptOpenEnded() {
+	printf "${bold}$1${clear}  "; read $2
+}
+
+dropToShell() {
+	printf "\n${bold}$1${clear}"
+	printf "\n${cyanbold}WHEN FINISHED, RETURN TO SCRIPT BY RUNNING ${clear}${bold}'exit'${clear}\n\n"
+	PS1="${bold}[ SUBSHELL${clear} \w${bold} ]# ${clear}" /bin/sh
+}
+
 configureZram() {
 	## zram-init
 	dnf in -y zram-init
@@ -92,22 +102,19 @@ stepPartition() {
 			) | try fdisk "$partitionDisk"
 		fi
 	else
+		dropToShell "You are now being dropped to a shell to manually configure disks.\nPlease partition, format, configure subvolumes if applicable, and other such things here.\nPlease remember that OMV has not yet been installed on the drive, and you are still working within a live environment. You will be prompted to configure fstab and other related things later.\n"
 		## manual partitioning
 		## drop to cfdisk and return when done
-		echo "You are now being exiled to cfdisk to configure your disk."; sleep 3
-		try cfdisk "$partitionDisk"; clear
-
-		readarray -t partitionList < <(lsblk -n -l -o NAME | grep "${partitionDisk##*/}[0-999]")
-		printf "\n${bold}Found partitions on disk: ${clear}${partitionList[*]}\n"
-		
-		i=1; for p in "${partitionList[@]}"; do
-			printf "${bold}Mountpoint for${clear} $i?  "; read partitionMountpoint$i
-			((i++))
-		done
-
-		q=1; until [[ $q == $i ]]; do
-			echo "$q count of matching partition count $i"
-		done
+		#echo "You are now being exiled to cfdisk to configure your disk."; sleep 3
+		#try cfdisk "$partitionDisk"; clear
+		#declare -A partitionList < <(lsblk -n -l -o NAME | grep "${partitionDisk##*/}[0-999]")
+		#printf "\n${bold}Found partitions on disk: ${clear}${partitionList[*]}\n"	
+		#for partition in "${partitionList[@]}"; do
+		#	printf "${bold}Mountpoint for${clear} $i?  "; read partitionMount
+		#done
+		#q=1; until [[ $q == $i ]]; do
+		#	echo "$q count of matching partition count $i"
+		#done
 	fi
 	return 0
 }
@@ -122,6 +129,7 @@ main() {
 	#	if ! rpm -qa | grep dosfstools; then try dnf install -y dosfstools; fi
 
 	printf "${cyanbold}✱\nOMV Snapshot Simple Installer\n✱${clear}\n"
+	#stepPrimary
 	stepPartition
 }
 
