@@ -40,13 +40,68 @@ usage() {
 ribbon() {
 	local cols=$(tput cols); local text="$1"; local padding=$((cols - ${#text}))
 
+	clear
 	tput sc #save cursor
 	tput cup $(tput lines) 0 #move cursor to last line
 	echo -en "${bluebg}${bold}${text}$(printf ' %.0s' $(seq 1 $padding))\e[0m" #set colors, print text, reset colors
 	tput rc #reload cursor
 }
 
-checkYesNo() {
+# returns: selectedItem
+selector() {
+	cmdIn=$(eval "$1")
+	readarray -t items <<<"$cmdIn"
+
+	## init variables
+	cursor=0
+	search_query=""
+	filteredItems=("${items[@]}")
+
+	while true; do
+		filteredItems=()
+		for item in "${items[@]}"; do
+			# if timezone, in lowercase, matches any part of search query, in lowercase, add to filtered results list
+			[[ "${item,,}" == *"${search_query,,}"* ]] && filteredItems+=("$item")
+		done
+
+		clear
+		local index=0; local start_index=$((cursor - 5))
+		[[ $start_index -lt 0 ]] && start_index=0 #ensure start index is not negative
+
+		# for as long as the items to list are not higher than 10 at one time; do
+		for ((i = start_index; i < start_index + 10; i++)); do
+			if [ $i -eq $cursor ]; then
+				echo -e "\e[7m${filteredItems[$i]}\e[0m" # highlight current selection
+			elif [ $i -lt ${#filteredItems[@]} ]; then
+				echo "${filteredItems[$i]}"
+			fi
+		done
+
+		# read user input
+		read -rsn1 input
+		case "$input" in
+			$'\e') # arrow keys / other escape sequences
+				read -rsn2 -t 0.001 key # read next two chars into 'key'
+				case "$key" in
+					'[A') ((cursor--)); [[ "$cursor" -lt 0 ]] && cursor=$(( ${#filteredItems[@]} - 1 ));; #up
+					'[B') ((cursor++)); [[ "$cursor" -ge "${#filteredItems[@]}" ]] && cursor=0;; #down
+				esac
+				;;
+			"") selectedItem="${filteredItems[$cursor]}"; break;; #return key
+			$'\x7f') [[ ${#search_query} -gt 0 ]] && search_query="${search_query:0:-1}";; #backspace key
+			*) search_query+="$input"; cursor=0;; #process all other keys as a keyword search and reset cursor to focus closest match
+		esac
+
+		# keep cursor from flying away
+		if [ $cursor -lt 0 ]; then
+			cursor=$(( ${#filteredItems[@]} - 1 ))
+		elif [ $cursor -ge ${#filteredItems[@]} ]; then
+			cursor=0
+		fi
+	done
+}
+
+yayOrNay() {
 	while true; do
 		printf "${bold}$1${clear} (Y/n/?)  "; read input
 		case "${input,,}" in
@@ -78,19 +133,34 @@ stepWelcome() {
 	printf "$(
 	cat <<- EOF
 	${cyanbold}✱
-	OMV Snapshot Simple Installer✱
-	${clear}${bold}
+	OMV Snapshot Simple Installer
+	✱${clear}${bold}
 
 	welcome! this is a simple installer for OMV minimal snapshots.
 	EOF
 	)"
 
-	sleep 3; clear
+	sleep 1; clear
 	return 0
 }
 
+confGeneral() {
+	clear #; ribbon "general configuration"
+	selector 'timedatectl list-timezones'
+	printf "${clearbold}Please select a timezone. Use up/down keys to navigate, or type to search.${clear}\n"
+	#selector 'timedatectl list-timezones'
+	echo "got it! selected timezone is $selectedItem"
+	# follow Calamares' outline:
+	## timezone/locale
+	## kbd layout
+	## partitions
+	## install
+	## reboot
+	
+}
+
 stepPartition() {
-	clear; ribbon "Partitioning"
+	clear; ribbon "partitioning"
 	lsblk
 	printf "${bold}Disk to use : ${clear}"; read partitionDisk; partitionDisk="/dev/${partitionDisk##*/}"
 	[[ -z "$(blkid | grep $partitionDisk)" ]] && die "invalid disk $partitionDisk"
@@ -168,7 +238,8 @@ main() {
 	#	if ! rpm -qa | grep dosfstools; then try dnf install -y dosfstools; fi
 	
 	try stepWelcome
-	try stepPartition
+	try confGeneral
+	#try stepPartition
 }
 
 main "$@"
