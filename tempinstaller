@@ -30,8 +30,19 @@ preChroot() {
 	timedatectl set-locale America/Denver
 	localectl set-keymap us
 
-	# partitioning (vda, p1 boot, p2 root; user input required for cfdisk. switch to fdisk if you want automation)
-	cfdisk /dev/vda
+	# using sfdisk (util-linux), delete the existing partition structure, and 
+	# create a new gpt layout with a 1G EFI partition and a btrfs partition of the rest of the drive's available space
+	echo 'label: gpt
+	label-id: 12345678-1234-1234-1234-1234567890ab
+	device: /dev/sdX
+	unit: sectors
+	first-lba: 2048
+
+	/dev/sdX1 : start=     2048, size=  2097152, type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B, bootable
+	/dev/sdX2 : start=  2099200, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4
+	' | sfdisk --wipe always /dev/vda
+
+	# create and mount filesystems
 	mkfs.fat -F32 /dev/vda1
 	mkfs.btrfs /dev/vda2
 	dnf in -y rsync
