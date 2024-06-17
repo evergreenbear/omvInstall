@@ -8,17 +8,20 @@
 [[ "$EUID" -ne 0 ]] && echo "error: run this script as root" && exit 1
 
 # winxp-style step ribbon (to scale coolness factor ofc)
-declare -r bold='\033[01m'
-declare -r bluebg='\e[48;5;24m'
+
 ribbon() {
+	declare -r bold='\033[01m'; declare -r bluebg='\e[48;5;24m'
 	local cols=$(tput cols); local text="$1"; local padding=$((cols - ${#text}))
-	clear; tput sc #save cursor
-	tput cup $(tput lines) 0 #move cursor to last line
-	echo -en "${bluebg}${bold}${text}$(printf ' %.0s' $(seq 1 $padding))\e[0m" #set colors, print text, reset colors
-	tput rc #reload cursor
+	while true; do
+		clear
+		tput cup $(tput lines) 0
+		echo -en "${bluebg}${bold}${text}$(printf ' %.0s' $(seq 1 $padding))\e[0m"
+		sleep 0.5  # Adjust sleep duration as needed to control refresh rate
+	done
 }
 
-main() {
+
+preChroot() {
 	# grab pkgKeep.list
 	curl -fLo /tmp/pkgKeep.list u.ursid.xyz/pkgkeep 
 
@@ -27,14 +30,14 @@ main() {
 	timedatectl set-locale America/Denver
 	localectl set-keymap us
 
-	# partitioning (nvme0n1, p1 boot, p2 root; user input required for cfdisk. switch to fdisk if you want automation)
-	cfdisk /dev/nvme0n1
-	mkfs.fat -F32 /dev/nvme0n1p1
-	mkfs.btrfs /dev/nvme0n1p2
+	# partitioning (vda, p1 boot, p2 root; user input required for cfdisk. switch to fdisk if you want automation)
+	cfdisk /dev/vda
+	mkfs.fat -F32 /dev/vda1
+	mkfs.btrfs /dev/vda2
 	dnf in -y rsync
 	mkdir -p /mnt/boot/efi
-	mount /dev/nvme0n1p1 /mnt/boot/efi
-	mount /dev/nvme0n1p2 /mnt
+	mount /dev/vda1 /mnt/boot/efi
+	mount /dev/vda2 /mnt
 
 	# subvol creation (OMV style; root, boot, home, /var{cache,log}, with @snapshots for snapper)
 	btrfs su cr /mnt/@
@@ -48,13 +51,13 @@ main() {
 	umount /mnt/boot/efi
 	umount /mnt
 
-	mount -o noatime,space_cache=v2,subvol=@ /dev/nvme0n1p2 /mnt
-	mount /dev/nvme0n1p1 /mnt/boot/efi
-	mkdir -p /mnt/boot && mount -o noatime,space_cache=v2,subvol=@boot /dev/nvme0n1p2 /mnt/boot
-	mkdir -p /mnt/home && mount -o noatime,space_cache=v2,subvol=@home /dev/nvme0n1p2 /mnt/boot
-	mkdir -p /mnt/.snapshots && mount -o noatime,space_cache=v2,subvol=@snapshots /dev/nvme0n1p2 /mnt/.snapshots
-	mkdir -p /mnt/var/cache && mount -o noatime,space_cache=v2,subvol=@var_cache /dev/nvme0n1p2 /mnt/var/cache
-	mkdir -p /mnt/var/log && mount -o noatime,space_cache=v2,subvol=@var_log /dev/nvme0n1p2 /mnt/var/log
+	mount -o noatime,space_cache=v2,subvol=@ /dev/vda2 /mnt
+	mount /dev/vda1 /mnt/boot/efi
+	mkdir -p /mnt/boot && mount -o noatime,space_cache=v2,subvol=@boot /dev/vda2 /mnt/boot
+	mkdir -p /mnt/home && mount -o noatime,space_cache=v2,subvol=@home /dev/vda2 /mnt/boot
+	mkdir -p /mnt/.snapshots && mount -o noatime,space_cache=v2,subvol=@snapshots /dev/vda2 /mnt/.snapshots
+	mkdir -p /mnt/var/cache && mount -o noatime,space_cache=v2,subvol=@var_cache /dev/vda2 /mnt/var/cache
+	mkdir -p /mnt/var/log && mount -o noatime,space_cache=v2,subvol=@var_log /dev/vda2 /mnt/var/log
 
 	ribbon "copying system..."
 	# copy iso in real time
@@ -107,6 +110,8 @@ main() {
 		compression-algorithm = zstd
 	EOF
 
+	cp tempinstaller /mnt/tmp
+
 	# prepare mounts for bootloader install
 	mount --bind /dev /mnt/dev
  	mount --bind /tmp /mnt/tmp
@@ -115,10 +120,9 @@ main() {
  	mount -t sysfs none /mnt/sys
  	mount -t devpts -o noexec,nosuid,gid=tty,mode=0620 devpts /mnt/dev/pts	
 	mount --bind /sys/firmware/efi/efivars /mnt/sys/firmware/efi/efivars
+}
 
-	# enter /mnt
-	chroot /mnt /bin/bash
-
+postChroot() {
 	# users & passwords
 	useradd -mG wheel  evergreen
 	passwd root
@@ -136,4 +140,29 @@ main() {
 	## setting up snapper must be done after reboot (but verify this)
 }
 
-main
+main() {
+
+	## running chroot will kill the script, since we're entering a new shell;
+	## my workaround: tell bash to run this script again when chrooting, with the argument post_chroot, 
+	## which tells us to continue where the script left off
+
+	# run from start if no argument is given
+	if [[ "$#" -eq 0 ]]; then 
+		preChroot
+	# if argument is given, check for its contents
+	else
+		for arg in "$@"; do
+			case "$arg" in
+				# we are in chroot and should run the rest of the script
+				"post_chroot") postChroot ;;
+
+				# everything else is unknown 
+				*) echo "error: unknown argument '$arg'" && exit 1 ;;
+			esac
+		done
+	fi
+	
+	chroot /mnt /bin/bash -c "bash /tmp/tempinstaller post_chroot"
+}
+
+main "$@"
