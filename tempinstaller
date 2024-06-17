@@ -20,7 +20,7 @@ ribbon() {
 
 main() {
 	# grab pkgKeep.list
-	curl -fLO u.ursid.xyz/pkgKeep.list
+	curl -fLo /tmp/pkgKeep.list u.ursid.xyz/pkgkeep 
 
 	ribbon "partitioning..."
 	# locale & keymap
@@ -62,7 +62,7 @@ main() {
 
 	ribbon "configuring system..."
 	# remove packages not in pkgKeep.list 
-	readarray -t pkgKeep < pkgKeep.list
+	readarray -t pkgKeep < /tmp/pkgKeep.list
 	readarray -t pkgList <<<$(rpm -qa --qf "%{NAME}\n")
 
 	for pkg in "${pkgList[@]}"; do
