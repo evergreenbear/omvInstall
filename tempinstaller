@@ -91,8 +91,9 @@ preChroot() {
 			*"$pkg"*) true ;;
 			*) 
 				if rpm -qa | grep "$pkg"; then
-					sudo dnf -y --skip-broken --installroot=/mnt rm "$pkg" ;;
+					sudo dnf -y --skip-broken --installroot=/mnt rm "$pkg"
 				fi
+			;;
 		esac
 	done
 
