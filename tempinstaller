@@ -10,7 +10,7 @@
 ## ribbon: https://stackoverflow.com/a/63662222
 setWindow () {
 	# create a virtual window that is two lines smaller at the bottom
-	tput csr 0 $(($LINES-2))
+	clear; tput csr 0 $(($LINES-2))
 }
 
 ribbon () {
