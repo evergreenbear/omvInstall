@@ -1,0 +1,198 @@
+#!/bin/bash
+
+##
+## install omv from live build, hard-coded for ursidae
+## (minimal, from-ABF-iso EFI install on btrfs, with subvols X, and zram)
+##
+
+[[ "$EUID" -ne 0 ]] && echo "error: run this script as root" && exit 1
+
+## ribbon: https://stackoverflow.com/a/63662222
+setWindow () {
+	# create a virtual window that is two lines smaller at the bottom
+	clear; tput csr 0 $(($LINES-2))
+}
+
+ribbon () {
+	# colors
+	declare -r bold='\033[1;37m'; declare -r bluebg='\e[48;5;24m'; declare -r clear='\033[0m'
+	# terminal sizing & text arg
+	local cols=$(tput cols); local text="$1"; local padding=$((cols - ${#text}))
+
+	# move cursor to last line; print text and color entire line using padding
+	tput sc
+	tput cup $LINES 0;
+	echo -en "${bluebg}${bold}${text}$(printf ' %.0s' $(seq 1 $padding))\e[0m"
+	# return cursor home
+	tput rc
+}
+
+
+preChroot() {
+	# grab pkgKeep.list
+	curl -fLo /tmp/pkgKeep.list u.ursid.xyz/pkgkeep 
+
+	ribbon "partitioning..." 
+	# locale & keymap
+	timedatectl set-locale America/Denver
+	localectl set-keymap us
+
+	# using sfdisk (util-linux), delete the existing partition structure, and 
+	# create a new gpt layout with a 1G EFI partition and a btrfs partition of the rest of the drive's available space
+	echo 'label: gpt
+	label-id: 12345678-1234-1234-1234-1234567890ab
+	device: /dev/sdX
+	unit: sectors
+	first-lba: 2048
+
+	/dev/vda1 : start=     2048, size=  2097152, type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B, bootable
+	/dev/vda2 : start=  2099200, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4
+	' | sfdisk --wipe always /dev/vda
+
+	# create and mount filesystems
+	mkfs.fat -F32 /dev/vda1
+	mkfs.btrfs /dev/vda2
+	dnf in -y rsync
+	mkdir -p /mnt/boot/efi
+	mount /dev/vda1 /mnt/boot/efi
+	mount /dev/vda2 /mnt
+
+	# subvol creation (OMV style; root, boot, home, /var{cache,log}, with @snapshots for snapper)
+	btrfs su cr /mnt/@
+	btrfs su cr /mnt/@boot
+	btrfs su cr /mnt/@home
+	btrfs su cr /mnt/@snapshots
+	btrfs su cr /mnt/@var_cache
+	btrfs su cr /mnt/@var_log
+
+	# remount as subvolumes
+	umount /mnt/boot/efi
+	umount /mnt
+
+	mount -o noatime,space_cache=v2,subvol=@ /dev/vda2 /mnt
+	mount /dev/vda1 /mnt/boot/efi
+	mkdir -p /mnt/boot && mount -o noatime,space_cache=v2,subvol=@boot /dev/vda2 /mnt/boot
+	mkdir -p /mnt/home && mount -o noatime,space_cache=v2,subvol=@home /dev/vda2 /mnt/boot
+	mkdir -p /mnt/.snapshots && mount -o noatime,space_cache=v2,subvol=@snapshots /dev/vda2 /mnt/.snapshots
+	mkdir -p /mnt/var/cache && mount -o noatime,space_cache=v2,subvol=@var_cache /dev/vda2 /mnt/var/cache
+	mkdir -p /mnt/var/log && mount -o noatime,space_cache=v2,subvol=@var_log /dev/vda2 /mnt/var/log
+
+	ribbon "copying system..."
+	# copy iso in real time
+	rsync -av --one-file-system / /mnt
+
+	ribbon "configuring system... (1/2)"
+	# remove packages not in pkgKeep.list 
+	readarray -t pkgKeep < /tmp/pkgKeep.list
+	readarray -t pkgList <<<$(rpm -qa --qf "%{NAME}\n")
+
+	for pkg in "${pkgList[@]}"; do
+		case "${pkgKeep[@]}" in
+			*"$pkg"*) true ;;
+			*) 
+				if rpm -qa | grep "$pkg"; then
+					sudo dnf -y --skip-broken --installroot=/mnt rm "$pkg"
+				fi
+			;;
+		esac
+	done
+
+	# install packages in pkgKeep.list that we do not have
+	for pkg in "${pkgKeep[@]}"; do
+		case "${pkgList[@]}" in
+			*"$pkg"*) true ;;
+			*) sudo dnf -y --installroot=/mnt in "$pkg" ;;
+		esac
+	done
+
+	# yoink genfstab from arch & generate /etc/fstab
+	curl -fLO https://raw.githubusercontent.com/glacion/genfstab/master/genfstab | bash genfstab -U /mnt
+
+	# hosts file
+	cat <<- EOF > /mnt/etc/hosts
+		# Standard host addresses
+		127.0.0.1  localhost
+		::1        localhost ip6-localhost ip6-loopback
+		ff02::1    ip6-allnodes
+		ff02::2    ip6-allrouters
+		# This host address
+		127.0.1.1  ursidae
+	EOF
+
+	# zram (caches memory pages instead of storing pages on-disk like swap, figure out which you want)
+	cat <<- EOF > /usr/lib/systemd/zram-generator.conf
+		# This config file enables a /dev/zram0 device with the default settings:
+		# — size — half of available RAM
+		# — compression — zstd
+		#
+		# To disable, uninstall zram-generator-defaults or create empty
+		# /etc/systemd/zram-generator.conf file.
+		[zram0]
+		zram-size = ram/2
+		compression-algorithm = zstd
+	EOF
+
+	cp tempinstaller /mnt/tmp
+
+	# prepare mounts for bootloader install
+	mount --bind /dev /mnt/dev
+ 	mount --bind /tmp /mnt/tmp
+ 	mount --bind /run /mnt/run
+ 	mount -t proc proc /mnt/proc
+ 	mount -t sysfs none /mnt/sys
+ 	mount -t devpts -o noexec,nosuid,gid=tty,mode=0620 devpts /mnt/dev/pts	
+	mount --bind /sys/firmware/efi/efivars /mnt/sys/firmware/efi/efivars
+}
+
+postChroot() {
+	ribbon "configuring system (2/2)"
+	# users & passwords
+	useradd -mG wheel  evergreen
+	passwd root
+	passwd evergreen
+	EDITOR=vim visudo # manually enable wheel
+
+	# bootloader
+	grub2-install /mnt/boot/efi --bootloader-id=OpenMandriva
+	grub2-mkconfig /boot/grub2/grub.cfg	
+
+	# preferred configs
+	hostnamectl set-hostname ursidae
+
+	# snapshots (snapper, 30:00 of video)
+	## setting up snapper must be done after reboot (but verify this)
+}
+
+main() {
+
+	## running chroot will kill the script, since we're entering a new shell;
+	## my workaround: tell bash to run this script again when chrooting, with the argument post_chroot, 
+	## which tells us to continue where the script left off
+
+	# i am lazy and hate configuring this every reboot
+	xrandr --newmode "1920x1080_60.00"  172.80  1920 2040 2248 2576  1080 1081 1084 1118  -HSync +Vsync
+	xrandr --addmode Virtual-1 "1920x1080_60.00"
+	xrandr --output Virtual-1 --mode "1920x1080_60.00"
+
+	# run from start if no argument is given
+	setWindow
+
+	if [[ "$#" -eq 0 ]]; then 
+		preChroot
+	# if argument is given, check for its contents
+	else
+		for arg in "$@"; do
+			case "$arg" in
+				# we are in chroot and should run the rest of the script
+				"post_chroot") postChroot ;;
+
+				# everything else is unknown 
+				*) echo "error: unknown argument '$arg'" && exit 1 ;;
+			esac
+		done
+	fi
+	
+	chroot /mnt /bin/bash -c "bash /tmp/tempinstaller post_chroot"
+}
+
+main "$@"
