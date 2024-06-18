@@ -85,18 +85,15 @@ preChroot() {
 	# remove packages not in pkgKeep.list 
 	readarray -t pkgKeep < /tmp/pkgKeep.list
 	readarray -t pkgList <<<$(rpm -qa --qf "%{NAME}\n")
-
-	for pkg in "${pkgList[@]}"; do
-		case "${pkgKeep[@]}" in
-			*"$pkg"*) true ;;
-			*) 
-				if rpm -qa | grep "$pkg"; then
-					sudo dnf -y --skip-broken --installroot=/mnt rm "$pkg"
-				fi
-			;;
-		esac
-	done
-
+	readarray -t rmPkgs < <(echo ${pkgList[@]} ${pkgKeep[@]} | tr ' ' '\n' | sort | uniq -u)
+	clear; for pkg in ${rmPkgs[@]}; do 	
+		echo "removing package $pkg"
+		sudo dnf -y --skip-broken --installroot=/mnt rm $pkg
+	done > dnfOut 2> dnfErr
+	
+	# refresh pkgList now that installed packages have changed
+	unset pkgList
+	readarray -t pkgList <<<$(rpm -qa --qf "%{NAME}\n")
 	# install packages in pkgKeep.list that we do not have
 	for pkg in "${pkgKeep[@]}"; do
 		case "${pkgList[@]}" in
@@ -106,7 +103,8 @@ preChroot() {
 	done
 
 	# yoink genfstab from arch & generate /etc/fstab
-	curl -fLO https://raw.githubusercontent.com/glacion/genfstab/master/genfstab | bash genfstab -U /mnt
+	curl -fLo /tmp/genfstab https://raw.githubusercontent.com/glacion/genfstab/master/genfstab
+	bash /tmp/genfstab -U /mnt
 
 	# hosts file
 	cat <<- EOF > /mnt/etc/hosts
@@ -132,7 +130,7 @@ preChroot() {
 		compression-algorithm = zstd
 	EOF
 
-	cp tempinstaller /mnt/tmp
+	cp tempinstall /mnt/tmp
 
 	# prepare mounts for bootloader install
 	mount --bind /dev /mnt/dev
@@ -192,7 +190,7 @@ main() {
 		done
 	fi
 	
-	chroot /mnt /bin/bash -c "bash /tmp/tempinstaller post_chroot"
+	chroot /mnt /bin/bash -c "bash /tmp/tempinstall post_chroot"
 }
 
 main "$@"
