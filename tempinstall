@@ -32,7 +32,7 @@ preChroot() {
 	# grab pkgKeep.list
 	curl -fLo /tmp/pkgKeep.list u.ursid.xyz/pkgkeep 
 
-	ribbon "partitioning..." 
+	#ribbon "partitioning..." 
 	# locale & keymap
 	timedatectl set-locale America/Denver
 	localectl set-keymap us
@@ -77,11 +77,11 @@ preChroot() {
 	mkdir -p /mnt/var/cache && mount -o noatime,space_cache=v2,subvol=@var_cache /dev/vda2 /mnt/var/cache
 	mkdir -p /mnt/var/log && mount -o noatime,space_cache=v2,subvol=@var_log /dev/vda2 /mnt/var/log
 
-	ribbon "copying system..."
+	#ribbon "copying system..."
 	# copy iso in real time
 	rsync -av --one-file-system / /mnt
 
-	ribbon "configuring system... (1/2)"
+	#ribbon "configuring system... (1/2)"
 	# remove packages not in pkgKeep.list 
 	readarray -t pkgKeep < /tmp/pkgKeep.list
 	readarray -t pkgList <<<$(rpm -qa --qf "%{NAME}\n")
@@ -143,7 +143,7 @@ preChroot() {
 }
 
 postChroot() {
-	ribbon "configuring system (2/2)"
+	#ribbon "configuring system (2/2)"
 	# users & passwords
 	useradd -mG wheel  evergreen
 	passwd root
