@@ -89,7 +89,10 @@ preChroot() {
 	for pkg in "${pkgList[@]}"; do
 		case "${pkgKeep[@]}" in
 			*"$pkg"*) true ;;
-			*) sudo dnf -y --installroot=/mnt rm "$pkg" ;;
+			*) 
+				if rpm -qa | grep "$pkg"; then
+					sudo dnf -y --skip-broken --installroot=/mnt rm "$pkg" ;;
+				fi
 		esac
 	done
 
