@@ -8,7 +8,7 @@
 [[ "$EUID" -ne 0 ]] && echo "error: run this script as root" && exit 1
 
 ## ribbon: https://stackoverflow.com/a/63662222
-set_window () {
+setWindow () {
 	# create a virtual window that is two lines smaller at the bottom
 	tput csr 0 $(($LINES-2))
 }
@@ -165,6 +165,8 @@ main() {
 	## which tells us to continue where the script left off
 
 	# run from start if no argument is given
+	setWindow
+
 	if [[ "$#" -eq 0 ]]; then 
 		preChroot
 	# if argument is given, check for its contents
