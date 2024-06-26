@@ -9,7 +9,6 @@ ncurses
 coreutils
 efi-filesystem
 rpm
-rpm-build
 rpm-helper
 rpmlint
 distro-release-rpm-setup
