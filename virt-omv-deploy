@@ -170,11 +170,9 @@ preChroot() {
 		fi
 	done
 
+	clear
 	ribbon "preparing chroot..."
 
-	# get script into new install to pick up after chroot
-	curl -fLo /mnt/tempinstall u.ursid.xyz/t
-	
 	# prepare bind mounts for bootloader
 	mount --bind /dev /mnt/dev
 	mount --bind /tmp /mnt/tmp
@@ -182,8 +180,7 @@ preChroot() {
 	mount -t devpts -o noexec,nosuid,gid=tty,mode=0620 devpts /mnt/dev/pts	
 	mount --bind /sys/firmware/efi/efivars /mnt/sys/firmware/efi/efivars
 
-	clear
-	chroot /mnt /usr/bin/bash -c "bash /tempinstall post_chroot"
+	chroot /mnt /usr/bin/bash -c "curl -fL u.ursid.xyz/virt-omv-deploy | bash -s post_chroot"
 }
 
 postChroot() {
@@ -208,7 +205,7 @@ postChroot() {
 	userdel live
 	## TODO: there is always more to cleanup; find it
 
-	clear
+	#clear
 	echo "Install complete. Reboot to access the system."
 }
 
