@@ -3,6 +3,7 @@ distro-release-common
 distro-release-OpenMandriva
 distro-release-repos
 distro-release-repos-keys
+distro-release-indexhtml
 locales
 locales-en
 ncurses
@@ -36,7 +37,7 @@ tar
 time
 util-linux
 util-linux-core
-busybox-static #min-iso
+busybox-static
 cronie-anacron
 distro-release-OpenMandriva
 dracut
@@ -51,7 +52,6 @@ kernel-firmware
 kernel-firmware-extra
 lvm2
 mdadm
-#nscd
 openssh-server
 openssh-clients
 omdv-bug-report
