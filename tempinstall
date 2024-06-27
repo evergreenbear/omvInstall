@@ -203,10 +203,10 @@ postChroot() {
 	useradd -mG wheel evergreen
 	
 	ribbon "password for user root"
-	until passwd root; do clear; ribbon "password for user root"; printf "retrying...\n"; done
+	until passwd root < /dev/tty; do clear; ribbon "password for user root"; printf "retrying...\n"; done
 	
 	ribbon "password for user evergreen"
-	until passwd evergreen; do clear; ribbon "password for user root"; printf "retrying...\n"; done
+	until passwd evergreen < /dev/tty; do clear; ribbon "password for user root"; printf "retrying...\n"; done
 
 	ribbon "configuring bootloader..."
 	grub2-install /mnt/boot/efi --bootloader-id=openmandriva
