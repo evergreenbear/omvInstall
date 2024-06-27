@@ -5,7 +5,14 @@
 ## (minimal, from-ABF-iso EFI install on btrfs, with subvols X, and zram)
 ##
 
+## TODO --
+##	add check to re-run passwd on fail
+##	remove live user after chroot
+##	cleanup env (make sure no files used for install stick around; etc.)
+
 [[ "$EUID" -ne 0 ]] && echo "error: run this script as root" && exit 1
+
+2>&1 | tee -a instErr.log
 
 ## ribbon: https://stackoverflow.com/a/63662222
 setWindow () {
@@ -27,36 +34,56 @@ ribbon () {
 	tput rc
 }
 
+gen_pkgList() {
+	unset pkgList
+	readarray -t pkgList <<<$(rpm --root=/mnt --dbpath=/var/lib/rpm -qa --qf "%{NAME}\n")
+}
 
 preChroot() {
-	# grab pkgKeep.list
+	ribbon "getting pkgKeep.list..."
 	curl -fLo /tmp/pkgKeep.list u.ursid.xyz/pkgkeep 
 
-	#ribbon "partitioning..." 
-	# locale & keymap
-	timedatectl set-locale America/Denver
+	ribbon "configuring locales..." 
+	timedatectl set-timezone America/Denver
 	localectl set-keymap us
+
+	ribbon "partitioning drive..."	
+	# make sure no data is already on drive
+	sfdisk --delete /dev/vda
 
 	# using sfdisk (util-linux), delete the existing partition structure, and 
 	# create a new gpt layout with a 1G EFI partition and a btrfs partition of the rest of the drive's available space
 	echo 'label: gpt
 	label-id: 12345678-1234-1234-1234-1234567890ab
-	device: /dev/sdX
+	device: /dev/vda
 	unit: sectors
 	first-lba: 2048
 
-	/dev/vda1 : start=     2048, size=  2097152, type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B, bootable
+	/dev/vda1 : start=     2048, size=2097152, type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B, bootable
 	/dev/vda2 : start=  2099200, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4
 	' | sfdisk --wipe always /dev/vda
 
+	# BIOS repartition w/ monolithic root
+	#echo 'label: gpt
+	#label-id: 12345678-1234-1234-1234-1234567890ab
+	#device: /dev/sdX
+	#unit: sectors
+	#first-lba: 2048
+
+	#/dev/vda1 : start=2048, size=4096, type=21686148-6449-6E6F-744E-656564454649, bootable
+	#/dev/vda2 : start=6144, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4
+	#' | sfdisk --wipe=always /dev/vda
+
+
+	ribbon "creating filesystems..."
 	# create and mount filesystems
 	mkfs.fat -F32 /dev/vda1
-	mkfs.btrfs /dev/vda2
-	dnf in -y rsync
-	mkdir -p /mnt/boot/efi
-	mount /dev/vda1 /mnt/boot/efi
+	mkfs.btrfs -f /dev/vda2
+	#mkdir -p /mnt/boot/efi
+	#mount /dev/vda1 /mnt/boot/efi
 	mount /dev/vda2 /mnt
 
+	ribbon "creating subvolumes..."
 	# subvol creation (OMV style; root, boot, home, /var{cache,log}, with @snapshots for snapper)
 	btrfs su cr /mnt/@
 	btrfs su cr /mnt/@boot
@@ -65,48 +92,31 @@ preChroot() {
 	btrfs su cr /mnt/@var_cache
 	btrfs su cr /mnt/@var_log
 
+	ribbon "remounting subvolumes..."
 	# remount as subvolumes
-	umount /mnt/boot/efi
+	#umount /mnt/boot/efi
 	umount /mnt
 
 	mount -o noatime,space_cache=v2,subvol=@ /dev/vda2 /mnt
-	mount /dev/vda1 /mnt/boot/efi
-	mkdir -p /mnt/boot && mount -o noatime,space_cache=v2,subvol=@boot /dev/vda2 /mnt/boot
-	mkdir -p /mnt/home && mount -o noatime,space_cache=v2,subvol=@home /dev/vda2 /mnt/boot
-	mkdir -p /mnt/.snapshots && mount -o noatime,space_cache=v2,subvol=@snapshots /dev/vda2 /mnt/.snapshots
-	mkdir -p /mnt/var/cache && mount -o noatime,space_cache=v2,subvol=@var_cache /dev/vda2 /mnt/var/cache
-	mkdir -p /mnt/var/log && mount -o noatime,space_cache=v2,subvol=@var_log /dev/vda2 /mnt/var/log
-
-	#ribbon "copying system..."
-	# copy iso in real time
-	rsync -av --one-file-system / /mnt
-
-	#ribbon "configuring system... (1/2)"
-	# remove packages not in pkgKeep.list 
-	readarray -t pkgKeep < /tmp/pkgKeep.list
-	readarray -t pkgList <<<$(rpm -qa --qf "%{NAME}\n")
-	readarray -t rmPkgs < <(echo ${pkgList[@]} ${pkgKeep[@]} | tr ' ' '\n' | sort | uniq -u)
-	clear; for pkg in ${rmPkgs[@]}; do 	
-		echo "removing package $pkg"
-		sudo dnf -y --skip-broken --installroot=/mnt rm $pkg
-	done > dnfOut 2> dnfErr
+	mkdir -v -p /mnt{/boot,/home,/.snapshots,/var/cache/,/var/log} #/mnt/boot/efi wasn't actually getting created when put here ¯\_(ツ)_/¯
+	mount -o noatime,space_cache=v2,subvol=@boot /dev/vda2 /mnt/boot
+	mount -o noatime,space_cache=v2,subvol=@home /dev/vda2 /mnt/home
+	mount -o noatime,space_cache=v2,subvol=@snapshots /dev/vda2 /mnt/.snapshots
+	mount -o noatime,space_cache=v2,subvol=@var_cache /dev/vda2 /mnt/var/cache
+	mount -o noatime,space_cache=v2,subvol=@var_log /dev/vda2 /mnt/var/log
+	mkdir -p -v /mnt/boot/efi && mount /dev/vda1 /mnt/boot/efi
 	
-	# refresh pkgList now that installed packages have changed
-	unset pkgList
-	readarray -t pkgList <<<$(rpm -qa --qf "%{NAME}\n")
-	# install packages in pkgKeep.list that we do not have
-	for pkg in "${pkgKeep[@]}"; do
-		case "${pkgList[@]}" in
-			*"$pkg"*) true ;;
-			*) sudo dnf -y --installroot=/mnt in "$pkg" ;;
-		esac
-	done
+	ribbon "copying system..."
+	rsync -av --one-file-system / /mnt
+	
+	# fstab
+	ribbon "making fstab"
+	dnf in -y git make m4
+	cd /tmp; git clone https://gitlab.archlinux.org/archlinux/arch-install-scripts.git
+	cd arch-install-scripts; make genfstab
+	./genfstab -U /mnt > /mnt/etc/fstab
 
-	# yoink genfstab from arch & generate /etc/fstab
-	curl -fLo /tmp/genfstab https://raw.githubusercontent.com/glacion/genfstab/master/genfstab
-	bash /tmp/genfstab -U /mnt
-
-	# hosts file
+	ribbon "writing /etc/hosts..."
 	cat <<- EOF > /mnt/etc/hosts
 		# Standard host addresses
 		127.0.0.1  localhost
@@ -117,6 +127,7 @@ preChroot() {
 		127.0.1.1  ursidae
 	EOF
 
+	ribbon "configuring zram..."
 	# zram (caches memory pages instead of storing pages on-disk like swap, figure out which you want)
 	cat <<- EOF > /usr/lib/systemd/zram-generator.conf
 		# This config file enables a /dev/zram0 device with the default settings:
@@ -130,47 +141,97 @@ preChroot() {
 		compression-algorithm = zstd
 	EOF
 
-	cp tempinstall /mnt/tmp
+	# read packages to keep and generate list of installed packages	
+	readarray -t pkgKeep < /tmp/pkgKeep.list
+	gen_pkgList
+
+	## begin package removal
+	# iterate through every installed package, making sure that:
+	# - the package is not in pkgKeep.list before removing
+	# - the package has not been previously removed (i.e. as a dependency) before attempting removal
+	for pkg in "${pkgList[@]}"; do
+		if ! echo "${pkgKeep[*]}" | grep -qw "$pkg"; then	
+			if gen_pkgList; echo "${pkgList[*]}" | grep -qw "$pkg"; then
+				ribbon "removing package $pkg"
+				sudo dnf --installroot=/mnt -y --skip-broken rm "$pkg"
+			fi
+		fi
+	done
+
+	gen_pkgList	
+	# iterate through every item in pkgKeep, installing each package if it is no longer present
+	for pkg in "${pkgKeep[@]}"; do
+		if ! echo "${pkgList[*]}" | grep -qw "$pkg"; then
+			ribbon "installing package $pkg"
+			sudo dnf --installroot=/mnt -y --skip-broken install "$pkg"
+		fi
+	done
+
+	## OLD
+	#for pkg in "${pkgKeep[@]}"; do
+	#	case "${pkgList[@]}" in
+	#		*"$pkg"*) true ;;
+	#		*) 
+	#			ribbon "installing pkg $pkg"
+	#			sudo dnf --installroot=/mnt -y in "$pkg" 
+	#			;;
+	#	esac
+	#done
+
+	ribbon "preparing chroot..."
+	# get script into new install to pick up after chroot
+	# curl -fLo /mnt/tempinstall u.ursid.xyz/t
+	clear
+	mkdir /mnt/inst
+	cp -v /home/live/inst /mnt/inst/tempinstall
 
 	# prepare mounts for bootloader install
-	mount --bind /dev /mnt/dev
- 	mount --bind /tmp /mnt/tmp
- 	mount --bind /run /mnt/run
  	mount -t proc proc /mnt/proc
+	mount --bind /dev /mnt/dev
+	mount --bind /tmp /mnt/tmp
+ 	mount --bind /run /mnt/run
  	mount -t sysfs none /mnt/sys
  	mount -t devpts -o noexec,nosuid,gid=tty,mode=0620 devpts /mnt/dev/pts	
 	mount --bind /sys/firmware/efi/efivars /mnt/sys/firmware/efi/efivars
+
+	chroot /mnt /usr/bin/bash -c "bash /inst/tempinstall post_chroot"
 }
 
 postChroot() {
-	#ribbon "configuring system (2/2)"
 	# users & passwords
-	useradd -mG wheel  evergreen
-	passwd root
-	passwd evergreen
-	EDITOR=vim visudo # manually enable wheel
+	useradd -mG wheel evergreen
+	while true; do
+		ribbon "password for user root"
+		if passwd root; break; fi
+	done
 
-	# bootloader
+	while true; do
+		ribbon "password for user evergreen"
+		if passwd evergreen; break; fi
+	done
+
+	ribbon "configuring bootloader..."
 	grub2-install /mnt/boot/efi --bootloader-id=OpenMandriva
-	grub2-mkconfig /boot/grub2/grub.cfg	
+	#grub2-install /dev/vda --bootloader-id=OpenMandriva
+	grub2-mkconfig -o /boot/grub2/grub.cfg
 
-	# preferred configs
 	hostnamectl set-hostname ursidae
 
 	# snapshots (snapper, 30:00 of video)
 	## setting up snapper must be done after reboot (but verify this)
+
+	ribbon "cleanup"
+	rm -rf /inst
+	userdel live
+
+	clear
+	echo "Install complete. Reboot to access the system."
 }
 
 main() {
-
 	## running chroot will kill the script, since we're entering a new shell;
 	## my workaround: tell bash to run this script again when chrooting, with the argument post_chroot, 
 	## which tells us to continue where the script left off
-
-	# i am lazy and hate configuring this every reboot
-	xrandr --newmode "1920x1080_60.00"  172.80  1920 2040 2248 2576  1080 1081 1084 1118  -HSync +Vsync
-	xrandr --addmode Virtual-1 "1920x1080_60.00"
-	xrandr --output Virtual-1 --mode "1920x1080_60.00"
 
 	# run from start if no argument is given
 	setWindow
@@ -189,8 +250,9 @@ main() {
 			esac
 		done
 	fi
+
+	# cleanup
 	
-	chroot /mnt /bin/bash -c "bash /tmp/tempinstall post_chroot"
 }
 
 main "$@"
