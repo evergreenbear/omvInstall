@@ -145,15 +145,10 @@ preChroot() {
 	readarray -t pkgKeep < /tmp/pkgKeep.list
 	gen_pkgList
 	
-	# prepare bind mounts for dnf & bootloader
+	# prepare bind mounts for dnf
  	mount -t proc proc /mnt/proc
-	mount --bind /dev /mnt/dev
-	mount --bind /tmp /mnt/tmp
- 	mount --bind /run /mnt/run
- 	mount -t sysfs none /mnt/sys
- 	mount -t devpts -o noexec,nosuid,gid=tty,mode=0620 devpts /mnt/dev/pts	
-	mount --bind /sys/firmware/efi/efivars /mnt/sys/firmware/efi/efivars
-
+	mount -t sysfs none /mnt/sys
+ 	
 	## begin package removal
 	# iterate through every installed package, making sure that:
 	# - the package is not in pkgKeep.list before removing
@@ -191,6 +186,13 @@ preChroot() {
 
 	# get script into new install to pick up after chroot
 	curl -fLo /mnt/tempinstall u.ursid.xyz/t
+	
+	# prepare bind mounts for bootloader
+	mount --bind /dev /mnt/dev
+	mount --bind /tmp /mnt/tmp
+ 	mount --bind /run /mnt/run
+	mount -t devpts -o noexec,nosuid,gid=tty,mode=0620 devpts /mnt/dev/pts	
+	mount --bind /sys/firmware/efi/efivars /mnt/sys/firmware/efi/efivars
 
 	clear
 	chroot /mnt /usr/bin/bash -c "bash /tempinstall post_chroot"
@@ -199,18 +201,31 @@ preChroot() {
 postChroot() {
 	# users & passwords
 	useradd -mG wheel evergreen
+	
+	ribbon "password for user root"
 	while true; do
-		ribbon "password for user root"
-		if passwd root; then break; fi
+		passwd root
+
+		if [ $? -eq 0 ]; then
+			break
+		else
+			clear; printf "retrying...\n"
+		fi
 	done
 
+	ribbon "password for user evergreen"
 	while true; do
-		ribbon "password for user evergreen"
-		if passwd evergreen; then break; fi
+		passwd evergreen
+
+		if [ $? -eq 0]; then
+			break
+		else
+			clear; printf "retrying...\n"
+		fi
 	done
 
 	ribbon "configuring bootloader..."
-	grub2-install /mnt/boot/efi --bootloader-id=OpenMandriva
+	grub2-install /mnt/boot/efi --bootloader-id=openmandriva
 	#grub2-install /dev/nvme0n1 --bootloader-id=OpenMandriva
 	grub2-mkconfig -o /boot/grub2/grub.cfg
 
@@ -220,7 +235,6 @@ postChroot() {
 	## setting up snapper must be done after reboot (but verify this)
 
 	ribbon "cleanup"
-	rm -rf /inst
 	userdel live
 
 	clear
@@ -228,17 +242,14 @@ postChroot() {
 }
 
 main() {
-	## running chroot will kill the script, since we're entering a new shell;
-	## my workaround: tell bash to run this script again when chrooting, with the argument post_chroot, 
-	## which tells us to continue where the script left off
-
-	# run from start if no argument is given
+	# init ribbon
 	setWindow
 
-	if [[ "$#" -eq 0 ]]; then 
+	if [[ "$#" -eq 0 ]]; then
+		# run from start if no argument is given
 		preChroot
-	# if argument is given, check for its contents
 	else
+		# check arguments if they are given
 		for arg in "$@"; do
 			case "$arg" in
 				# we are in chroot and should run the rest of the script
@@ -249,9 +260,6 @@ main() {
 			esac
 		done
 	fi
-
-	# cleanup
-	
 }
 
 main "$@"
