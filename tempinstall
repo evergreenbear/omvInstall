@@ -202,12 +202,12 @@ postChroot() {
 	useradd -mG wheel evergreen
 	while true; do
 		ribbon "password for user root"
-		if passwd root; break; fi
+		if passwd root; then break; fi
 	done
 
 	while true; do
 		ribbon "password for user evergreen"
-		if passwd evergreen; break; fi
+		if passwd evergreen; then break; fi
 	done
 
 	ribbon "configuring bootloader..."
