@@ -1,0 +1,236 @@
+#!/bin/bash
+
+##
+## install OpenMandriva from a live iso, converting it into a minimal install
+## setup w/ efi & root partition with @, @boot, @home, @snapshots, @var_cache & @var_log subvols and zram of half RAM capacity
+## 
+## this script is hard-configured for my system and most likely will need modification to work on yours
+## !! this script also wipes the given drive the second it is ran, pretty much !!
+##
+
+## TODO:
+##	- setup snapper
+
+[[ "$EUID" -ne 0 ]] && echo "error: run this script as root" && exit 1
+
+## ribbon: https://stackoverflow.com/a/63662222
+setWindow () {
+	# create a virtual window that is two lines smaller at the bottom
+	clear; tput csr 0 $(($LINES-2))
+}
+ribbon () {
+	# colors
+	declare -r bold='\033[1;37m'; declare -r bluebg='\e[48;5;24m'; declare -r clear='\033[0m'
+	# terminal sizing & text arg
+	local cols=$(tput cols); local text="$1"; local padding=$((cols - ${#text}))
+
+	# move cursor to last line; print text and color entire line using padding
+	tput sc
+	tput cup $LINES 0;
+	echo -en "${bluebg}${bold}${text}$(printf ' %.0s' $(seq 1 $padding))\e[0m"
+	# return cursor home
+	tput rc
+}
+
+gen_pkgList() {
+	# unset & recreate array of installed package names
+	unset pkgList
+	readarray -t pkgList <<<$(rpm --root=/mnt --dbpath=/var/lib/rpm -qa --qf "%{NAME}\n")
+}
+
+preChroot() {
+	# pkgKeep.list specifies packages that must exist on the new system
+	ribbon "getting pkgKeep.list..."
+	curl -fLo /tmp/pkgKeep.list u.ursid.xyz/pkgkeep 
+
+	ribbon "configuring locales..." 
+	timedatectl set-timezone America/Denver
+	localectl set-keymap us
+
+	ribbon "partitioning drive..."	
+	# make sure no data is already on drive
+	sfdisk --delete /dev/vda
+
+	# using sfdisk (util-linux), delete the existing partition structure, and 
+	# create a new gpt layout with a 1G EFI partition and a btrfs partition of the rest of the drive's available space
+	echo 'label: gpt
+	label-id: 12345678-1234-1234-1234-1234567890ab
+	device: /dev/vda
+	unit: sectors
+	first-lba: 2048
+
+	/dev/vda1 : start=     2048, size=2097152, type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B, bootable
+	/dev/vda2 : start=  2099200, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4
+	' | sfdisk --wipe always /dev/vda
+
+	# BIOS
+	#echo 'label: gpt
+	#label-id: 12345678-1234-1234-1234-1234567890ab
+	#device: /dev/sdX
+	#unit: sectors
+	#first-lba: 2048
+
+	#/dev/vda1 : start=2048, size=4096, type=21686148-6449-6E6F-744E-656564454649, bootable
+	#/dev/vda2 : start=6144, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4
+	#' | sfdisk --wipe=always /dev/vda
+
+
+	ribbon "creating filesystems..."
+	# create filesystems
+	mkfs.fat -F32 /dev/vda1
+	mkfs.btrfs -f /dev/vda2
+	mount /dev/vda2 /mnt
+
+	ribbon "creating subvolumes..."
+	# create subvols (OMV style; root, boot, home, /var{cache,log}, with @snapshots for snapper)
+	btrfs su cr /mnt/@
+	btrfs su cr /mnt/@boot
+	btrfs su cr /mnt/@home
+	btrfs su cr /mnt/@snapshots
+	btrfs su cr /mnt/@var_cache
+	btrfs su cr /mnt/@var_log
+
+	ribbon "remounting subvolumes..."
+	umount /mnt
+
+	# remount as subvolumes, with desired flags
+	mount -o noatime,space_cache=v2,subvol=@ /dev/vda2 /mnt
+	mkdir -v -p /mnt{/boot,/home,/.snapshots,/var/cache/,/var/log} #/mnt/boot/efi wasn't actually getting created when put here ¯\_(ツ)_/¯
+	mount -o noatime,space_cache=v2,subvol=@boot /dev/vda2 /mnt/boot
+	mount -o noatime,space_cache=v2,subvol=@home /dev/vda2 /mnt/home
+	mount -o noatime,space_cache=v2,subvol=@snapshots /dev/vda2 /mnt/.snapshots
+	mount -o noatime,space_cache=v2,subvol=@var_cache /dev/vda2 /mnt/var/cache
+	mount -o noatime,space_cache=v2,subvol=@var_log /dev/vda2 /mnt/var/log
+	mkdir -p -v /mnt/boot/efi && mount /dev/vda1 /mnt/boot/efi
+	
+	# copy live system to drive
+	ribbon "copying system..."
+	rsync -av --one-file-system / /mnt
+	
+	# compile genfstab & gen the fstab
+	ribbon "generating fstab"
+	dnf in -y git make m4
+	cd /tmp; git clone https://gitlab.archlinux.org/archlinux/arch-install-scripts.git
+	cd arch-install-scripts; make genfstab
+	./genfstab -U /mnt > /mnt/etc/fstab
+
+	## TODO: just get systemd to do this automatically once the hostname is set
+	ribbon "writing /etc/hosts..."
+	cat <<- EOF > /mnt/etc/hosts
+		# Standard host addresses
+		127.0.0.1  localhost
+		::1        localhost ip6-localhost ip6-loopback
+		ff02::1    ip6-allnodes
+		ff02::2    ip6-allrouters
+		# This host address
+		127.0.1.1  ursidae
+	EOF
+
+	# setup desired zram configuration
+	ribbon "configuring zram..."
+	cat <<- EOF > /mnt/usr/lib/systemd/zram-generator.conf
+		# This config file enables a /dev/zram0 device with the default settings:
+		# — size — half of available RAM
+		# — compression — zstd
+		#
+		# To disable, uninstall zram-generator-defaults or create empty
+		# /etc/systemd/zram-generator.conf file.
+		[zram0]
+		zram-size = ram/2
+		compression-algorithm = zstd
+	EOF
+
+	# read packages to keep and generate list of installed packages	
+	readarray -t pkgKeep < /tmp/pkgKeep.list
+	gen_pkgList
+	
+	# prepare bind mounts for dnf
+ 	mount -t proc proc /mnt/proc
+	mount -t sysfs none /mnt/sys
+ 	
+	## begin package removal
+	# iterate through every installed package, making sure that:
+	# - the package is not in pkgKeep.list before removing
+	# - the package has not been previously removed (i.e. as a dependency) before attempting removal
+	for pkg in "${pkgList[@]}"; do
+		if ! echo "${pkgKeep[*]}" | grep -qw "$pkg"; then	
+			if gen_pkgList; echo "${pkgList[*]}" | grep -qw "$pkg"; then
+				ribbon "removing package $pkg"
+				sudo dnf --installroot=/mnt -y --skip-broken rm "$pkg"
+			fi
+		fi
+	done
+
+	gen_pkgList	
+	# iterate through every item in pkgKeep, installing each package if it is no longer present
+	for pkg in "${pkgKeep[@]}"; do
+		if ! echo "${pkgList[*]}" | grep -qw "$pkg"; then
+			ribbon "installing package $pkg"
+			sudo dnf --installroot=/mnt -y --skip-broken install "$pkg"
+		fi
+	done
+
+	ribbon "preparing chroot..."
+
+	# get script into new install to pick up after chroot
+	curl -fLo /mnt/tempinstall u.ursid.xyz/t
+	
+	# prepare bind mounts for bootloader
+	mount --bind /dev /mnt/dev
+	mount --bind /tmp /mnt/tmp
+ 	mount --bind /run /mnt/run
+	mount -t devpts -o noexec,nosuid,gid=tty,mode=0620 devpts /mnt/dev/pts	
+	mount --bind /sys/firmware/efi/efivars /mnt/sys/firmware/efi/efivars
+
+	clear
+	chroot /mnt /usr/bin/bash -c "bash /tempinstall post_chroot"
+}
+
+postChroot() {
+	# users & passwords
+	useradd -mG wheel evergreen
+	
+	ribbon "password for user root"
+	until passwd root < /dev/tty; do clear; sleep 1; ribbon "password for user root"; printf "retrying...\n"; done
+	
+	ribbon "password for user evergreen"
+	until passwd evergreen < /dev/tty; do clear; sleep 1; ribbon "password for user root"; printf "retrying...\n"; done
+
+	ribbon "configuring bootloader..."
+	grub2-install /mnt/boot/efi --bootloader-id=openmandriva
+	grub2-mkconfig -o /boot/grub2/grub.cfg
+
+	hostnamectl set-hostname ursidae
+
+	## snapper here, eventually
+
+	ribbon "cleanup"
+	userdel live
+	## TODO: there is always more to cleanup; find it
+
+	clear
+	echo "Install complete. Reboot to access the system."
+}
+
+main() {
+	# init ribbon
+	setWindow
+
+	if [[ "$#" -eq 0 ]]; then
+		# run from start if no argument is given
+		preChroot
+	else
+		# check arguments if they are given
+		for arg in "$@"; do
+			case "$arg" in
+				# we are in chroot and should run the rest of the script
+				"post_chroot") postChroot ;;
+
+				# everything else is unknown 
+				*) echo "error: unknown argument '$arg'" && exit 1 ;;
+			esac
+		done
+	fi
+}
+
+main "$@"
