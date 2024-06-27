@@ -144,6 +144,15 @@ preChroot() {
 	# read packages to keep and generate list of installed packages	
 	readarray -t pkgKeep < /tmp/pkgKeep.list
 	gen_pkgList
+	
+	# prepare bind mounts for dnf & bootloader
+ 	mount -t proc proc /mnt/proc
+	mount --bind /dev /mnt/dev
+	mount --bind /tmp /mnt/tmp
+ 	mount --bind /run /mnt/run
+ 	mount -t sysfs none /mnt/sys
+ 	mount -t devpts -o noexec,nosuid,gid=tty,mode=0620 devpts /mnt/dev/pts	
+	mount --bind /sys/firmware/efi/efivars /mnt/sys/firmware/efi/efivars
 
 	## begin package removal
 	# iterate through every installed package, making sure that:
@@ -179,22 +188,12 @@ preChroot() {
 	#done
 
 	ribbon "preparing chroot..."
+
 	# get script into new install to pick up after chroot
-	# curl -fLo /mnt/tempinstall u.ursid.xyz/t
+	curl -fLo /mnt/tempinstall u.ursid.xyz/t
+
 	clear
-	mkdir /mnt/inst
-	cp -v /home/live/inst /mnt/inst/tempinstall
-
-	# prepare mounts for bootloader install
- 	mount -t proc proc /mnt/proc
-	mount --bind /dev /mnt/dev
-	mount --bind /tmp /mnt/tmp
- 	mount --bind /run /mnt/run
- 	mount -t sysfs none /mnt/sys
- 	mount -t devpts -o noexec,nosuid,gid=tty,mode=0620 devpts /mnt/dev/pts	
-	mount --bind /sys/firmware/efi/efivars /mnt/sys/firmware/efi/efivars
-
-	chroot /mnt /usr/bin/bash -c "bash /inst/tempinstall post_chroot"
+	chroot /mnt /usr/bin/bash -c "bash /tempinstall post_chroot"
 }
 
 postChroot() {
