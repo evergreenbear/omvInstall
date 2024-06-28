@@ -206,3 +206,4 @@ icu-data
 distro-release-repos-pkgprefs
 networkmanager
 wpa-supplicant
+iwlwifi-agn-ucode
