@@ -204,3 +204,5 @@ libgpg-error-common
 popt-data
 icu-data
 distro-release-repos-pkgprefs
+networkmanager
+wpa-supplicant
