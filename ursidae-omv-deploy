@@ -180,7 +180,7 @@ preChroot() {
 	mount -t devpts -o noexec,nosuid,gid=tty,mode=0620 devpts /mnt/dev/pts	
 	mount --bind /sys/firmware/efi/efivars /mnt/sys/firmware/efi/efivars
 
-	chroot /mnt /usr/bin/bash -c "curl -fL u.ursid.xyz/virt-omv-deploy | bash -s post_chroot"
+	chroot /mnt /usr/bin/bash -c "curl -fL u.ursid.xyz/ursidae-omv-deploy | bash -s post_chroot"
 }
 
 postChroot() {
