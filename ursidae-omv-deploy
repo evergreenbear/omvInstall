@@ -141,34 +141,35 @@ preChroot() {
 	EOF
 
 	# read packages to keep and generate list of installed packages	
-	readarray -t pkgKeep < /tmp/pkgKeep.list
-	gen_pkgList
+	#readarray -t pkgKeep < /tmp/pkgKeep.list
+	#gen_pkgList
 	
 	# prepare bind mounts for dnf
  	mount -t proc proc /mnt/proc
 	mount -t sysfs none /mnt/sys
  	
+	### DEPRECATED: minimal images made with os-image-builder now boot
 	## begin package removal
 	# iterate through every installed package, making sure that:
 	# - the package is not in pkgKeep.list before removing
 	# - the package has not been previously removed (i.e. as a dependency) before attempting removal
-	for pkg in "${pkgList[@]}"; do
-		if ! echo "${pkgKeep[*]}" | grep -qw "$pkg"; then	
-			if gen_pkgList; echo "${pkgList[*]}" | grep -qw "$pkg"; then
-				ribbon "removing package $pkg"
-				sudo dnf --installroot=/mnt -y --skip-broken rm "$pkg"
-			fi
-		fi
-	done
+	#for pkg in "${pkgList[@]}"; do
+	#	if ! echo "${pkgKeep[*]}" | grep -qw "$pkg"; then	
+	#		if gen_pkgList; echo "${pkgList[*]}" | grep -qw "$pkg"; then
+	#			ribbon "removing package $pkg"
+	#			sudo dnf --installroot=/mnt -y --skip-broken rm "$pkg"
+	#		fi
+	#	fi
+	#done
 
-	gen_pkgList	
+	#gen_pkgList	
 	# iterate through every item in pkgKeep, installing each package if it is no longer present
-	for pkg in "${pkgKeep[@]}"; do
-		if ! echo "${pkgList[*]}" | grep -qw "$pkg"; then
-			ribbon "installing package $pkg"
-			sudo dnf --installroot=/mnt -y --skip-broken install "$pkg"
-		fi
-	done
+	#for pkg in "${pkgKeep[@]}"; do
+	#	if ! echo "${pkgList[*]}" | grep -qw "$pkg"; then
+	#		ribbon "installing package $pkg"
+	#		sudo dnf --installroot=/mnt -y --skip-broken install "$pkg"
+	#	fi
+	#done
 
 	clear
 	ribbon "preparing chroot..."
@@ -197,7 +198,7 @@ postChroot() {
 	grub2-install /mnt/boot/efi --bootloader-id=openmandriva
 	grub2-mkconfig -o /boot/grub2/grub.cfg
 
-	hostnamectl set-hostname ursidae
+	hostnamectl set-hostname melursus #ursidae
 
 	## snapper here, eventually
 
